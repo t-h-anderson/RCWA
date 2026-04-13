@@ -1,5 +1,8 @@
 function epsz = epsn(loc, nmz)
-
+arguments
+    loc (1,1) struct
+    nmz (1,:) double {mustBeReal, mustBeFinite}
+end
 % Only allow gratings that do not contain semiconductor material
 if(loc.nmda < loc.nmLg)
     loc.nmda = loc.nmLg;

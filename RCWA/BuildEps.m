@@ -1,4 +1,17 @@
 function [eps,loc]=BuildEps(mat_cat, nmx, nmz, nmlambda, Eg, varargin)
+arguments
+    mat_cat  (1,:) double {mustBeInteger, mustBeNonnegative}
+    nmx      (1,:) double {mustBeReal, mustBeFinite}
+    nmz      (1,:) double {mustBeReal, mustBeFinite}
+    nmlambda (1,1) double {mustBeReal, mustBePositive}
+    Eg       (:,1) double {mustBeReal, mustBeNonnegative}
+    varargin
+end
+if length(Eg) ~= length(nmz)
+    error('BuildEps:sizeMismatch', ...
+        'Eg must have one entry per z-slice: expected %d, got %d.', ...
+        length(nmz), length(Eg));
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%Optimization%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 loc = DefaultLoc;

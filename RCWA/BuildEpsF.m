@@ -1,4 +1,14 @@
 function [epsf]=BuildEpsF(nmz, epsxz, loc)
+arguments
+    nmz   (1,:) double {mustBeReal, mustBeFinite}
+    epsxz (:,:) double
+    loc   (1,1) struct
+end
+if size(epsxz, 2) ~= length(nmz)
+    error('BuildEpsF:sizeMismatch', ...
+        'epsxz must have one column per z-slice: expected %d columns, got %d.', ...
+        length(nmz), size(epsxz, 2));
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%Optimization%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

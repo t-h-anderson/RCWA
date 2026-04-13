@@ -1,5 +1,17 @@
 function [Z,Tn,R,E] ...
     = RCWA(inmk0, radtheta, epsf, nmdz, varargin)
+arguments
+    inmk0    (1,1) double {mustBeReal, mustBePositive}
+    radtheta (1,1) double {mustBeReal, mustBeFinite}
+    epsf     (:,:) double
+    nmdz     (1,:) double {mustBeReal, mustBePositive}
+    varargin
+end
+if size(epsf, 1) ~= length(nmdz)
+    error('RCWA:sizeMismatch', ...
+        'epsf must have one row per layer: expected %d rows, got %d.', ...
+        length(nmdz), size(epsf, 1));
+end
 % [Z, Tn, R, e_x, e_y, e_z, h_x, h_y, h_z] = RCWA(epsmat, epsmat_recip, nmdz, (opt) varargin)
 % Z is the Z matrix from EMSW
 % Tn the tranfter matrix for each mode through each slice

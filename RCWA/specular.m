@@ -1,5 +1,18 @@
 function [rp0,rp1,tp0,tp1]=specular...
     (R,T, inmk0, radtheta, loc, varargin)
+arguments
+    R        (:,1) double
+    T        (:,1) double
+    inmk0    (1,1) double {mustBeReal, mustBePositive}
+    radtheta (1,1) double {mustBeReal, mustBeFinite}
+    loc      (1,1) struct
+    varargin
+end
+if length(R) ~= length(T)
+    error('specular:sizeMismatch', ...
+        'R and T must have the same length: |R|=%d, |T|=%d.', ...
+        length(R), length(T));
+end
 
 %%%%%%%%%%%%%%%%%%%%%%%%Optimization%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
