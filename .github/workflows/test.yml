@@ -2,7 +2,12 @@ name: MATLAB tests
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   test:
@@ -22,6 +27,8 @@ jobs:
           release: R2024a
 
       - name: Run unit tests
+        id: tests
+        continue-on-error: true
         uses: matlab-actions/run-tests@v2
         with:
           # Folders prepended to the MATLAB path. Listed explicitly
@@ -41,3 +48,96 @@ jobs:
         with:
           name: test-results
           path: test-results/junit.xml
+
+      - name: Post failures as PR comment
+        if: steps.tests.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const junitPath = 'test-results/junit.xml';
+            const runUrl =
+              `https://github.com/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            // ----- Resolve a PR number to comment on --------------------------------
+            // For pull_request events, context.issue.number is set. For push events
+            // we look up an open PR whose HEAD matches the pushed SHA.
+            let issue_number = context.payload.pull_request &&
+                               context.payload.pull_request.number;
+            if (!issue_number) {
+              const { data: prs } = await github.rest.repos
+                .listPullRequestsAssociatedWithCommit({
+                  ...context.repo, commit_sha: context.sha,
+                });
+              const open = prs.find(pr => pr.state === 'open');
+              if (open) issue_number = open.number;
+            }
+            if (!issue_number) {
+              core.warning(
+                'Tests failed but no PR is associated with this commit; ' +
+                'open a PR to receive failure comments. Run: ' + runUrl);
+              return;
+            }
+
+            // ----- Parse JUnit XML for failed test cases ----------------------------
+            let body;
+            if (!fs.existsSync(junitPath)) {
+              body =
+                `### MATLAB tests failed\n\n` +
+                `The test step failed before producing JUnit output ` +
+                `(likely a setup or path error). ` +
+                `[See the Actions log](${runUrl}).`;
+            } else {
+              const xml = fs.readFileSync(junitPath, 'utf8');
+              const cases = [
+                ...xml.matchAll(/<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g),
+              ];
+              const attr = (tag, name) => {
+                const m = tag.match(new RegExp(`\\b${name}="([^"]*)"`));
+                return m ? m[1] : '';
+              };
+              const failed = cases
+                .map(([, openTag, inner]) => ({
+                  name:      attr(openTag, 'name'),
+                  classname: attr(openTag, 'classname'),
+                  inner,
+                }))
+                .filter(c => /<(failure|error)\b/.test(c.inner));
+
+              if (failed.length === 0) {
+                body =
+                  `### MATLAB tests failed\n\n` +
+                  `The test action reported failure but no individual ` +
+                  `testcase failures were recorded in JUnit. ` +
+                  `[See the Actions log](${runUrl}).`;
+              } else {
+                const sections = failed.map(c => {
+                  const detail = c.inner.match(
+                    /<(failure|error)\b([^>]*)>([\s\S]*?)<\/\1>/);
+                  const msg = detail ? attr(detail[2], 'message') : '';
+                  const txt = detail
+                    ? detail[3]
+                        .replace(/<!\[CDATA\[|\]\]>/g, '')
+                        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                        .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+                        .trim()
+                    : '';
+                  return `**${c.classname}.${c.name}**\n` +
+                         `_${msg || '(no message)'}_\n` +
+                         '```\n' + txt.slice(0, 1500) + '\n```';
+                });
+                body =
+                  `### MATLAB tests failed (${failed.length} of ${cases.length})\n\n` +
+                  sections.join('\n\n---\n\n') +
+                  `\n\n[Full Actions log](${runUrl})`;
+              }
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number, body,
+            });
+
+      - name: Fail job if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
