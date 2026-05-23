@@ -191,11 +191,19 @@ classdef SpectrumRunner
                     above = sign(rcwa.Units.eV_from_nm(nmlambda(ll)) - EgJ);
                     gamma = rcwa.Constants.h * rcwa.Constants.c / ...
                             rcwa.Units.m_from_nm(nmlambda(ll));
-                    Gl(ll, :, :) = W2inmim2Sl(ll) * ...
-                        Q_temp(1, :, geom.mat_cat == 2) / gamma;
-                    Gl(ll, :, :) = bsxfun(@times, squeeze(Gl(ll, :, :)), ...
-                                          (above == 1)');
-                    G = G + nmdlambda * squeeze(Gl(ll, :, :));
+                    % MATLAB strips trailing singleton dimensions, so
+                    % zeros(1, Nx, 1) is actually a 1xNx matrix. squeeze
+                    % then yields a row vector that broadcasts against
+                    % the (Nx, 1) accumulator G into (Nx, Nx). Force the
+                    % shape explicitly through reshape to keep the
+                    % accumulation unambiguous for any nJunction.
+                    QJ = reshape(Q_temp(1, :, geom.mat_cat == 2), ...
+                                 cfg.Nx, nJunction);
+                    Gl_this = (W2inmim2Sl(ll) / gamma) * QJ;
+                    mask = reshape(above == 1, 1, nJunction);
+                    Gl_this = bsxfun(@times, Gl_this, mask);
+                    Gl(ll, :, :) = reshape(Gl_this, 1, cfg.Nx, nJunction);
+                    G = G + nmdlambda * Gl_this;
                 end
             end
 
