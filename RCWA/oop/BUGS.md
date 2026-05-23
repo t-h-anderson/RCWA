@@ -261,6 +261,38 @@ right scope.
 
 ---
 
+## BUG-016 — `RCWAsetup.m:198-200`: junction-generation accumulation broadcasts when `nlambda * nJunction == 1`
+
+```matlab
+Gl(ll,:,:) = (W2inmim2Sl(ll) * Q_temp(1, :, mat_cat==2) / gamma);
+Gl(ll,:,:) = bsxfun(@times, squeeze(Gl(ll,:,:)), (above_bandgap==1)');
+G = G + nmdlambda * squeeze(Gl(ll,:,:));
+```
+
+**Why it's wrong.** MATLAB strips trailing singleton dimensions: when
+`nlambda == 1` and `nJunction == 1`, `Gl = zeros(1, Nx, 1)` is stored
+as a `1xNx` 2D matrix. `squeeze(Gl(ll,:,:))` then returns a `1xNx`
+row instead of the `Nx*1` column the surrounding code assumes. The
+accumulation
+
+    G = G + nmdlambda * squeeze(Gl(ll,:,:));
+
+implicitly broadcasts `(Nx, 1) + (1, Nx)` into `(Nx, Nx)` (MATLAB
+R2016b and later), corrupting `G` from then on. The downstream
+`sum(G, 1)` becomes `1*Nx` instead of a scalar, and any code that
+later expected a per-junction-slice vector silently gets `Nx` extra
+values.
+
+**Impact.** Latent in the legacy `RCWAsetup` — no thesis run hit it
+because every realistic configuration has either `nlambda > 1` or
+`nJunction > 1`. Surfaced by `SpectrumRunnerTest.deterministic-
+Reproducibility` in the OOP port, which deliberately runs the
+smallest possible config (`nlambda = Nz = 1`). The fix in the port
+is to pin the working layout to `(Nx, nJunction)` via explicit
+`reshape` calls.
+
+---
+
 ## BUG-012 — `Faryad.m`: leftover scratch with side-effecting calls and dead allocation
 
 ```matlab
