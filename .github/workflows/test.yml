@@ -2,7 +2,6 @@ name: MATLAB tests
 
 on:
   push:
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -31,14 +30,17 @@ jobs:
         continue-on-error: true
         uses: matlab-actions/run-tests@v2
         with:
-          # Folders prepended to the MATLAB path. Listed explicitly
-          # rather than using genpath because the action does not
-          # recurse. Keep this in sync with RCWA/oop/tests/run_all.m.
-          source-folder: |
-            RCWA
-            RCWA/Materials
-            RCWA/Materials/aSiH
-            RCWA/oop
+          # The action prepends source-folder (and its subfolders) to
+          # the MATLAB path. Subfolder recursion follows genpath rules,
+          # which means +rcwa is skipped as a package directory while
+          # RCWA/oop (its parent) is added -- which is exactly what we
+          # need for `rcwa.Config` etc. to resolve.
+          #
+          # NB. source-folder takes a single semicolon-separated string,
+          # not a YAML list. The earlier `|` form silently failed to add
+          # anything to the path, so every test errored with
+          # "Unable to resolve the name 'rcwa.Config'".
+          source-folder: RCWA
           select-by-folder: RCWA/oop/tests
           test-results-junit: test-results/junit.xml
 
