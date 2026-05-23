@@ -1,0 +1,158 @@
+name: MATLAB tests
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        # Batch licensing for matlab-actions is granted automatically on
+        # PUBLIC repos. If this repo ever goes private, add a
+        # MathWorks-issued batch token and pass it here as:
+        #     with:
+        #       license: ${{ secrets.MLM_LICENSE_TOKEN }}
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: R2024a
+          # Materials/aSiH/aSiHGC.m calls `ei` (the exponential integral)
+          # which ships in the Symbolic Math Toolbox, not base MATLAB.
+          products: Symbolic_Math_Toolbox
+
+      - name: Run unit tests
+        id: tests
+        continue-on-error: true
+        uses: matlab-actions/run-tests@v2
+        with:
+          # The action prepends source-folder (and its subfolders) to
+          # the MATLAB path. Subfolder recursion follows genpath rules,
+          # which means +rcwa is skipped as a package directory while
+          # RCWA/oop (its parent) is added -- which is exactly what we
+          # need for `rcwa.Config` etc. to resolve.
+          #
+          # NB. source-folder takes a single semicolon-separated string,
+          # not a YAML list. The earlier `|` form silently failed to add
+          # anything to the path, so every test errored with
+          # "Unable to resolve the name 'rcwa.Config'".
+          source-folder: RCWA
+          select-by-folder: RCWA/oop/tests
+          test-results-junit: test-results/junit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/junit.xml
+
+      - name: Post failures as PR comment
+        if: steps.tests.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const junitPath = 'test-results/junit.xml';
+            const runUrl =
+              `https://github.com/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+
+            // ----- Resolve a PR number to comment on --------------------------------
+            // For pull_request events, context.issue.number is set. For push events
+            // we look up an open PR whose HEAD matches the pushed SHA.
+            let issue_number = context.payload.pull_request &&
+                               context.payload.pull_request.number;
+            if (!issue_number) {
+              const { data: prs } = await github.rest.repos
+                .listPullRequestsAssociatedWithCommit({
+                  ...context.repo, commit_sha: context.sha,
+                });
+              const open = prs.find(pr => pr.state === 'open');
+              if (open) issue_number = open.number;
+            }
+            if (!issue_number) {
+              core.warning(
+                'Tests failed but no PR is associated with this commit; ' +
+                'open a PR to receive failure comments. Run: ' + runUrl);
+              return;
+            }
+
+            // ----- Parse JUnit XML for failed test cases ----------------------------
+            let body;
+            if (!fs.existsSync(junitPath)) {
+              body =
+                `### MATLAB tests failed\n\n` +
+                `The test step failed before producing JUnit output ` +
+                `(likely a setup or path error). ` +
+                `[See the Actions log](${runUrl}).`;
+            } else {
+              const xml = fs.readFileSync(junitPath, 'utf8');
+              // Handle both self-closing (`<testcase ... />`, passing
+              // tests) and open/close (`<testcase ...> ... </testcase>`,
+              // failing tests) forms. Without the alternation the open
+              // pattern misaligns: a `<testcase .../>` "opening" gets
+              // glued to the next `</testcase>` and the inner failure
+              // body ends up attributed to a different test name.
+              const re =
+                /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+              const cases = [];
+              let m;
+              while ((m = re.exec(xml)) !== null) {
+                cases.push({ openTag: m[1], inner: m[2] || '' });
+              }
+              const attr = (tag, name) => {
+                const a = tag.match(new RegExp(`\\b${name}="([^"]*)"`));
+                return a ? a[1] : '';
+              };
+              const failed = cases
+                .map(c => ({
+                  name:      attr(c.openTag, 'name'),
+                  classname: attr(c.openTag, 'classname'),
+                  inner:     c.inner,
+                }))
+                .filter(c => /<(failure|error)\b/.test(c.inner));
+
+              if (failed.length === 0) {
+                body =
+                  `### MATLAB tests failed\n\n` +
+                  `The test action reported failure but no individual ` +
+                  `testcase failures were recorded in JUnit. ` +
+                  `[See the Actions log](${runUrl}).`;
+              } else {
+                const sections = failed.map(c => {
+                  const detail = c.inner.match(
+                    /<(failure|error)\b([^>]*)>([\s\S]*?)<\/\1>/);
+                  const msg = detail ? attr(detail[2], 'message') : '';
+                  const txt = detail
+                    ? detail[3]
+                        .replace(/<!\[CDATA\[|\]\]>/g, '')
+                        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                        .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+                        .trim()
+                    : '';
+                  return `**${c.classname}.${c.name}**\n` +
+                         `_${msg || '(no message)'}_\n` +
+                         '```\n' + txt.slice(0, 1500) + '\n```';
+                });
+                body =
+                  `### MATLAB tests failed (${failed.length} of ${cases.length})\n\n` +
+                  sections.join('\n\n---\n\n') +
+                  `\n\n[Full Actions log](${runUrl})`;
+              }
+            }
+
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number, body,
+            });
+
+      - name: Fail job if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
