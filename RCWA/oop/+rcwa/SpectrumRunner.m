@@ -203,8 +203,12 @@ classdef SpectrumRunner
             if nJunction > 0
                 nmgtop = geom.nmgtop;
                 nmLz   = cfg.nmLp + cfg.nmLi + cfg.nmLn;
-                Gx = [nmLz - (geom.nmz(geom.mat_cat == 2) - nmgtop); ...
-                      sum(G, 1) * nmdx / cfg.nmLx]';
+                zCoord = nmLz - (geom.nmz(geom.mat_cat == 2) - nmgtop);
+                xIntG  = sum(G, 1) * nmdx / cfg.nmLx;
+                % Force columns to avoid vertcat shape surprises when
+                % nJunction == 1 (sum collapses the row to a scalar with
+                % a different effective orientation than nmz(...)).
+                Gx = [zCoord(:), xIntG(:)];
             else
                 Gx = zeros(0, 2);
             end
