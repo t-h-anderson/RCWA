@@ -8,7 +8,10 @@ classdef PermittivityBuilder
     properties (SetAccess = immutable)
         cfg     rcwa.Config
         geom    rcwa.Geometry
-        grating rcwa.gratings.Grating
+        % `grating` is intentionally untyped: rcwa.gratings.Grating is
+        % abstract, and MATLAB tries to default-construct any typed
+        % property -- which fails for abstract classes.
+        grating
     end
 
     methods

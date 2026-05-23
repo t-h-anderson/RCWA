@@ -24,6 +24,9 @@ jobs:
         uses: matlab-actions/setup-matlab@v2
         with:
           release: R2024a
+          # Materials/aSiH/aSiHGC.m calls `ei` (the exponential integral)
+          # which ships in the Symbolic Math Toolbox, not base MATLAB.
+          products: Symbolic_Math_Toolbox
 
       - name: Run unit tests
         id: tests
@@ -92,18 +95,28 @@ jobs:
                 `[See the Actions log](${runUrl}).`;
             } else {
               const xml = fs.readFileSync(junitPath, 'utf8');
-              const cases = [
-                ...xml.matchAll(/<testcase\b([^>]*)>([\s\S]*?)<\/testcase>/g),
-              ];
+              // Handle both self-closing (`<testcase ... />`, passing
+              // tests) and open/close (`<testcase ...> ... </testcase>`,
+              // failing tests) forms. Without the alternation the open
+              // pattern misaligns: a `<testcase .../>` "opening" gets
+              // glued to the next `</testcase>` and the inner failure
+              // body ends up attributed to a different test name.
+              const re =
+                /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g;
+              const cases = [];
+              let m;
+              while ((m = re.exec(xml)) !== null) {
+                cases.push({ openTag: m[1], inner: m[2] || '' });
+              }
               const attr = (tag, name) => {
-                const m = tag.match(new RegExp(`\\b${name}="([^"]*)"`));
-                return m ? m[1] : '';
+                const a = tag.match(new RegExp(`\\b${name}="([^"]*)"`));
+                return a ? a[1] : '';
               };
               const failed = cases
-                .map(([, openTag, inner]) => ({
-                  name:      attr(openTag, 'name'),
-                  classname: attr(openTag, 'classname'),
-                  inner,
+                .map(c => ({
+                  name:      attr(c.openTag, 'name'),
+                  classname: attr(c.openTag, 'classname'),
+                  inner:     c.inner,
                 }))
                 .filter(c => /<(failure|error)\b/.test(c.inner));
 

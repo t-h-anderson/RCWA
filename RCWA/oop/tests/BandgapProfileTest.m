@@ -27,7 +27,10 @@ classdef BandgapProfileTest < matlab.unittest.TestCase
             bp = rcwa.BandgapProfile('Eg0', 1.7, 'A', 0, ...
                                      'nmLp', 0, 'nmLi', 100, 'nmLn', 0, ...
                                      'legacy', false);
-            nmz = linspace(0, 100, 21);
+            % Sample strictly inside the i-layer (0,100). The boundaries
+            % land on the layer-categorisation sign() seams and fall into
+            % no layer (faithful to the original sign-trick semantics).
+            nmz = linspace(1, 99, 21);
             tc.verifyTrue(all(abs(bp.evaluate(nmz) - 1.7) < 1e-12));
         end
 
